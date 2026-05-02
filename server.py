@@ -527,7 +527,7 @@ PAGE_HTML = """\
   </div>
 </main>
 
-<div id="debug-panel" style="position:fixed;top:0;right:0;width:380px;max-height:50vh;overflow-y:auto;background:#0d0f14;border:1px solid #23272f;border-radius:0 0 0 8px;padding:10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b7280;z-index:999;display:block;">
+<div id="debug-panel" style="position:fixed;bottom:50px;left:0;width:380px;max-height:30vh;overflow-y:auto;background:#0d0f14;border:1px solid #23272f;border-radius:0 8px 0 0;padding:10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b7280;z-index:999;">
   <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
     <span style="color:#818cf8;">⬡ Debug Log</span>
     <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:11px;">✕</button>
