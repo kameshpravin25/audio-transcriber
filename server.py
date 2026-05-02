@@ -190,6 +190,8 @@ async def websocket_audio(esp_ws: WebSocket):
                     msg_type = data.get("type", "")
 
                     if msg_type != "Results":
+                        print(f"[Deepgram] Event: {msg_type} → {str(data)[:200]}")
+                        await broadcast(f"__DEBUG__:[DG] {msg_type}: {str(data)[:150]}")
                         continue
 
                     channel = data.get("channel")
@@ -525,6 +527,14 @@ PAGE_HTML = """\
   </div>
 </main>
 
+<div id="debug-panel" style="position:fixed;top:0;right:0;width:380px;max-height:50vh;overflow-y:auto;background:#0d0f14;border:1px solid #23272f;border-radius:0 0 0 8px;padding:10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b7280;z-index:999;display:block;">
+  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+    <span style="color:#818cf8;">⬡ Debug Log</span>
+    <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:11px;">✕</button>
+  </div>
+  <div id="debug-log"></div>
+</div>
+
 <footer>
   <span id="line-count">0 lines</span>
   <div class="footer-btns">
@@ -745,6 +755,21 @@ PAGE_HTML = """\
       }
       if (msg.startsWith('__LLM_ERROR__:')) {
         showLlmError(msg.substring('__LLM_ERROR__:'.length));
+        return;
+      }
+
+      // ── Debug log ─────────────────────────────────────────────────────
+      if (msg.startsWith('__DEBUG__:')) {
+        const logEl = document.getElementById('debug-log');
+        if (logEl) {
+          const d = document.createElement('div');
+          d.style.borderBottom = '1px solid #1a1d24';
+          d.style.padding = '3px 0';
+          d.style.wordBreak = 'break-all';
+          d.textContent = new Date().toLocaleTimeString() + ' ' + msg.substring('__DEBUG__:'.length);
+          logEl.appendChild(d);
+          logEl.scrollTop = logEl.scrollHeight;
+        }
         return;
       }
     };
