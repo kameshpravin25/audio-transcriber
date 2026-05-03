@@ -32,8 +32,8 @@ DEEPGRAM_URL = (
     f"?model=nova-3&language=en&encoding=linear16"
     f"&sample_rate={SAMPLE_RATE}&channels=1"
     f"&interim_results=true&punctuate=true"
-    f"&smart_format=true&endpointing=300"
-    f"&utterance_end_ms=1000&vad_events=true"
+    f"&smart_format=true&endpointing=500"
+    f"&utterance_end_ms=1500"
 )
 
 # ─── Shared state ────────────────────────────────────────────────────────────
@@ -177,8 +177,9 @@ async def websocket_audio(esp_ws: WebSocket):
         dg_ws = await websockets.connect(
             DEEPGRAM_URL,
             additional_headers=headers,
-            ping_interval=5,
-            ping_timeout=10,
+            ping_interval=20,
+            ping_timeout=20,
+            close_timeout=5,
         )
         await broadcast("__STATUS__:deepgram_connected")
         print("[Deepgram] Connected")
@@ -213,13 +214,29 @@ async def websocket_audio(esp_ws: WebSocket):
                         if is_final:
                             transcript_buffer.append(transcript)
 
-            except websockets.ConnectionClosed:
-                print("[Deepgram] Connection closed")
+            except websockets.ConnectionClosed as e:
+                print(f"[Deepgram] Connection closed: code={e.code} reason={e.reason}")
+            except Exception as e:
+                print(f"[Deepgram] Receive error: {e}")
 
         recv_task = asyncio.create_task(receive_transcripts())
 
         while True:
             audio = await esp_ws.receive_bytes()
+            # Check if Deepgram is still alive
+            if dg_ws.closed:
+                print("[Deepgram] Connection lost, reconnecting...")
+                dg_ws = await websockets.connect(
+                    DEEPGRAM_URL,
+                    additional_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=5,
+                )
+                recv_task.cancel()
+                recv_task = asyncio.create_task(receive_transcripts())
+                print("[Deepgram] Reconnected!")
+
             await dg_ws.send(audio)
             chunks += 1
             if chunks == 1:
@@ -232,7 +249,9 @@ async def websocket_audio(esp_ws: WebSocket):
     except Exception as e:
         print(f"[Error] {e}")
     finally:
-        if dg_ws:
+        if recv_task and not recv_task.done():
+            recv_task.cancel()
+        if dg_ws and not dg_ws.closed:
             await dg_ws.close()
         await broadcast("__STATUS__:esp32_disconnected")
         await broadcast("__STATUS__:deepgram_disconnected")
