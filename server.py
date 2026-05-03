@@ -223,21 +223,26 @@ async def websocket_audio(esp_ws: WebSocket):
 
         while True:
             audio = await esp_ws.receive_bytes()
-            # Check if Deepgram is still alive
-            if dg_ws.closed:
+            try:
+                await dg_ws.send(audio)
+            except Exception:
                 print("[Deepgram] Connection lost, reconnecting...")
-                dg_ws = await websockets.connect(
-                    DEEPGRAM_URL,
-                    additional_headers=headers,
-                    ping_interval=20,
-                    ping_timeout=20,
-                    close_timeout=5,
-                )
-                recv_task.cancel()
-                recv_task = asyncio.create_task(receive_transcripts())
-                print("[Deepgram] Reconnected!")
+                try:
+                    dg_ws = await websockets.connect(
+                        DEEPGRAM_URL,
+                        additional_headers=headers,
+                        ping_interval=20,
+                        ping_timeout=20,
+                        close_timeout=5,
+                    )
+                    recv_task.cancel()
+                    recv_task = asyncio.create_task(receive_transcripts())
+                    await dg_ws.send(audio)
+                    print("[Deepgram] Reconnected!")
+                except Exception as re_err:
+                    print(f"[Deepgram] Reconnect failed: {re_err}")
+                    break
 
-            await dg_ws.send(audio)
             chunks += 1
             if chunks == 1:
                 print(f"[Audio] First chunk: {len(audio)} bytes")
@@ -251,8 +256,10 @@ async def websocket_audio(esp_ws: WebSocket):
     finally:
         if recv_task and not recv_task.done():
             recv_task.cancel()
-        if dg_ws and not dg_ws.closed:
+        try:
             await dg_ws.close()
+        except Exception:
+            pass
         await broadcast("__STATUS__:esp32_disconnected")
         await broadcast("__STATUS__:deepgram_disconnected")
         print("[Cleanup] Session ended")
