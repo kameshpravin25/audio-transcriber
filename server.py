@@ -171,9 +171,12 @@ async def websocket_audio(esp_ws: WebSocket):
     transcript_buffer.clear()
 
     dg_ws = None
+    recv_task = None
     chunks = 0
     try:
         headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
+        print(f"[Deepgram] Connecting to: {DEEPGRAM_URL[:80]}...")
+        print(f"[Deepgram] API key: {DEEPGRAM_API_KEY[:8]}...{DEEPGRAM_API_KEY[-4:]}")
         dg_ws = await websockets.connect(
             DEEPGRAM_URL,
             additional_headers=headers,
@@ -182,12 +185,34 @@ async def websocket_audio(esp_ws: WebSocket):
             close_timeout=5,
         )
         await broadcast("__STATUS__:deepgram_connected")
-        print("[Deepgram] Connected")
+        print(f"[Deepgram] Connected (state: open={dg_ws.protocol.state if hasattr(dg_ws, 'protocol') else 'n/a'})")
 
         async def receive_transcripts():
+            """Receive and process Deepgram transcript messages."""
+            nonlocal dg_ws
+            print("[Deepgram] Receive task started — waiting for messages...")
+            msg_count = 0
             try:
-                async for msg in dg_ws:
-                    data = json.loads(msg)
+                while True:
+                    try:
+                        msg = await dg_ws.recv()
+                    except websockets.ConnectionClosed as e:
+                        print(f"[Deepgram] Connection closed during recv: code={e.code} reason={e.reason}")
+                        await broadcast(f"__DEBUG__:[DG] Closed: {e.code} {e.reason}")
+                        break
+
+                    msg_count += 1
+                    # Log first few raw messages for debugging
+                    if msg_count <= 3:
+                        raw_preview = str(msg)[:300] if isinstance(msg, str) else f"<bytes len={len(msg)}>"
+                        print(f"[Deepgram] Raw msg #{msg_count}: {raw_preview}")
+
+                    try:
+                        data = json.loads(msg)
+                    except (json.JSONDecodeError, TypeError) as je:
+                        print(f"[Deepgram] JSON parse error: {je} — raw: {str(msg)[:200]}")
+                        continue
+
                     msg_type = data.get("type", "")
 
                     if msg_type != "Results":
@@ -214,18 +239,31 @@ async def websocket_audio(esp_ws: WebSocket):
                         if is_final:
                             transcript_buffer.append(transcript)
 
-            except websockets.ConnectionClosed as e:
-                print(f"[Deepgram] Connection closed: code={e.code} reason={e.reason}")
+            except asyncio.CancelledError:
+                print(f"[Deepgram] Receive task cancelled after {msg_count} messages")
             except Exception as e:
-                print(f"[Deepgram] Receive error: {e}")
+                import traceback
+                print(f"[Deepgram] Receive error: {type(e).__name__}: {e}")
+                traceback.print_exc()
+                await broadcast(f"__DEBUG__:[DG] Recv error: {e}")
+
+        def task_exception_callback(task: asyncio.Task):
+            """Catch any unhandled exception from the receive task."""
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc:
+                print(f"[Deepgram] TASK EXCEPTION: {type(exc).__name__}: {exc}")
 
         recv_task = asyncio.create_task(receive_transcripts())
+        recv_task.add_done_callback(task_exception_callback)
 
         while True:
             audio = await esp_ws.receive_bytes()
             try:
                 await dg_ws.send(audio)
-            except Exception:
+            except Exception as send_err:
+                print(f"[Deepgram] Send failed: {type(send_err).__name__}: {send_err}")
                 print("[Deepgram] Connection lost, reconnecting...")
                 try:
                     dg_ws = await websockets.connect(
@@ -237,6 +275,7 @@ async def websocket_audio(esp_ws: WebSocket):
                     )
                     recv_task.cancel()
                     recv_task = asyncio.create_task(receive_transcripts())
+                    recv_task.add_done_callback(task_exception_callback)
                     await dg_ws.send(audio)
                     print("[Deepgram] Reconnected!")
                 except Exception as re_err:
@@ -248,16 +287,24 @@ async def websocket_audio(esp_ws: WebSocket):
                 print(f"[Audio] First chunk: {len(audio)} bytes")
             if chunks % 500 == 0:
                 print(f"[Audio] Forwarded {chunks} chunks")
+                # Check if receive task is still alive
+                if recv_task.done():
+                    print("[Deepgram] WARNING: Receive task died! Restarting...")
+                    recv_task = asyncio.create_task(receive_transcripts())
+                    recv_task.add_done_callback(task_exception_callback)
 
     except WebSocketDisconnect:
         print(f"[ESP32] Disconnected after {chunks} chunks")
     except Exception as e:
-        print(f"[Error] {e}")
+        import traceback
+        print(f"[Error] {type(e).__name__}: {e}")
+        traceback.print_exc()
     finally:
         if recv_task and not recv_task.done():
             recv_task.cancel()
         try:
-            await dg_ws.close()
+            if dg_ws:
+                await dg_ws.close()
         except Exception:
             pass
         await broadcast("__STATUS__:esp32_disconnected")
