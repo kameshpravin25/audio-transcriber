@@ -50,7 +50,7 @@ i2s_config_t i2s_config = {
   .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
   .sample_rate = SAMPLE_RATE,
   .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-  .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
+  .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
   .communication_format = I2S_COMM_FORMAT_STAND_I2S,
   .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
   .dma_buf_count = 8, .dma_buf_len = 256,
@@ -139,7 +139,7 @@ void loop() {
   if (bytesRead > 0) {
     int samples = bytesRead / 4;
     for (int i = 0; i < samples; i++) {
-      buffer16[i] = (int16_t)(raw32[i] >> 14);
+      buffer16[i] = (int16_t)(raw32[i] >> 16);
     }
     webSocket.sendBIN((uint8_t*)buffer16, samples * 2);
   }
