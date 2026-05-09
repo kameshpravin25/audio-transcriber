@@ -58,10 +58,11 @@ llm = ChatGoogleGenerativeAI(
 )
 
 LLM_SYSTEM_PROMPT = (
-    "You are a super chill, casual AI buddy. "
-    "When the user says something, rephrase or explain it back to them "
-    "in a relaxed, friendly, conversational tone — like you're texting a friend. "
-    "Keep it short (1-3 sentences max). No bullet points, no formal language."
+    "You are Sync AI, a smart and concise assistant. "
+    "When the user provides a transcript or message, summarise the key points "
+    "from the conversation so far in 2-3 sentences. "
+    "Then ask exactly 2 relevant follow-up questions to the user "
+    "to help deepen the discussion or clarify important details."
 )
 
 
@@ -320,7 +321,7 @@ PAGE_HTML = """\
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ESP32 Live Transcription</title>
+<title>SyncScribe</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -570,7 +571,7 @@ PAGE_HTML = """\
 <body>
 
 <header>
-  <h1>ESP32 Live Transcription</h1>
+  <h1>SyncScribe</h1>
   <div class="status-row">
     <div class="status-item">
       <span class="dot" id="dot-ws"></span>
@@ -586,7 +587,7 @@ PAGE_HTML = """\
     </div>
     <div class="status-item">
       <span class="dot" id="dot-llm"></span>
-      <span id="lbl-llm">Gemini</span>
+      <span id="lbl-llm">Sync AI</span>
     </div>
   </div>
 </header>
@@ -612,8 +613,8 @@ PAGE_HTML = """\
   <span id="line-count">0 lines</span>
   <div class="footer-btns">
     <button id="btn-stop" onclick="triggerLLM()" disabled
-            title="Process transcript with Gemini (or press Q)">
-      ⬡ Ask Gemini
+            title="Process transcript with Sync AI (or press Q)">
+      ⬡ Ask Sync AI
     </button>
     <button onclick="clearTranscript()">Clear</button>
     <button id="btn-clear-history" onclick="clearHistory()">Reset Chat</button>
@@ -704,14 +705,14 @@ PAGE_HTML = """\
     // Add a divider
     const div = document.createElement('div');
     div.className = 'divider';
-    div.textContent = 'Gemini';
+    div.textContent = 'Sync AI';
     container.appendChild(div);
 
     // Create the LLM response block
     currentLlmEl = document.createElement('div');
     currentLlmEl.className = 'llm-block';
     currentLlmEl.innerHTML =
-      '<div class="llm-label"><span class="pulse" id="llm-pulse"></span> Gemini is thinking...</div>' +
+      '<div class="llm-label"><span class="pulse" id="llm-pulse"></span> Sync AI is thinking...</div>' +
       '<span id="llm-text"></span>';
     container.appendChild(currentLlmEl);
     scrollBottom();
@@ -733,7 +734,7 @@ PAGE_HTML = """\
     if (pulse) pulse.className = 'pulse done';
 
     const label = currentLlmEl && currentLlmEl.querySelector('.llm-label');
-    if (label) label.innerHTML = '<span class="pulse done"></span> Gemini';
+    if (label) label.innerHTML = '<span class="pulse done"></span> Sync AI';
 
     btnStop.disabled = !hasTranscript;
     scrollBottom();
