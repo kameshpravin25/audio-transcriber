@@ -557,6 +557,72 @@ PAGE_HTML = """\
     color: var(--muted);
   }
 
+  footer button#btn-download {
+    border-color: #065f46;
+    color: var(--accent);
+  }
+  footer button#btn-download:hover {
+    border-color: var(--accent);
+    background: #06553e22;
+  }
+
+  footer button#btn-debug-toggle {
+    border-color: var(--llm-dim);
+    color: var(--llm);
+    font-size: 11px;
+  }
+  footer button#btn-debug-toggle:hover {
+    border-color: var(--llm);
+    background: #1e1b4b44;
+  }
+  footer button#btn-debug-toggle.active {
+    background: #1e1b4b66;
+    border-color: var(--llm);
+  }
+
+  /* ── Debug panel (hidden by default) ────────── */
+  #debug-panel {
+    position: fixed;
+    bottom: 50px;
+    left: 0;
+    width: 400px;
+    max-height: 35vh;
+    overflow-y: auto;
+    background: #0d0f14;
+    border: 1px solid var(--border);
+    border-radius: 0 8px 0 0;
+    padding: 10px 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    z-index: 999;
+    display: none;
+    transition: opacity 0.2s ease;
+  }
+  #debug-panel.visible { display: block; }
+
+  #debug-panel .debug-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  #debug-panel .debug-header span {
+    color: var(--llm);
+    font-weight: 500;
+  }
+  #debug-panel .debug-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 4px;
+  }
+  #debug-panel .debug-close:hover { color: var(--text); }
+
   @keyframes fadein {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -601,10 +667,10 @@ PAGE_HTML = """\
   </div>
 </main>
 
-<div id="debug-panel" style="position:fixed;bottom:50px;left:0;width:380px;max-height:30vh;overflow-y:auto;background:#0d0f14;border:1px solid #23272f;border-radius:0 8px 0 0;padding:10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b7280;z-index:999;">
-  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-    <span style="color:#818cf8;">⬡ Debug Log</span>
-    <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:11px;">✕</button>
+<div id="debug-panel">
+  <div class="debug-header">
+    <span>⬡ Debug Log</span>
+    <button class="debug-close" onclick="toggleDebug()">✕</button>
   </div>
   <div id="debug-log"></div>
 </div>
@@ -616,8 +682,16 @@ PAGE_HTML = """\
             title="Process transcript with Sync AI (or press Q)">
       ⬡ Ask Sync AI
     </button>
+    <button id="btn-download" onclick="downloadConversation()"
+            title="Download conversation as text file">
+      ↓ Download
+    </button>
     <button onclick="clearTranscript()">Clear</button>
     <button id="btn-clear-history" onclick="clearHistory()">Reset Chat</button>
+    <button id="btn-debug-toggle" onclick="toggleDebug()"
+            title="Toggle debug log panel">
+      ⬡ Debug
+    </button>
   </div>
 </footer>
 
@@ -767,6 +841,77 @@ PAGE_HTML = """\
     countEl.textContent = '0 lines';
     emptyEl.style.display = '';
     btnStop.disabled = true;
+  }
+
+  // ── Debug panel toggle ────────────────────────────────────────────────────
+  function toggleDebug() {
+    const panel = document.getElementById('debug-panel');
+    const btn   = document.getElementById('btn-debug-toggle');
+    panel.classList.toggle('visible');
+    btn.classList.toggle('active');
+  }
+
+  // ── Download conversation ─────────────────────────────────────────────────
+  function downloadConversation() {
+    const lines = [];
+    const date = new Date();
+    const header = 'SyncScribe — Conversation Export';
+    const sep = '='.repeat(50);
+    lines.push(sep);
+    lines.push(header);
+    lines.push('Date: ' + date.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }));
+    lines.push('Time: ' + date.toLocaleTimeString('en-GB', { hour12: false }));
+    lines.push(sep);
+    lines.push('');
+
+    const elements = container.querySelectorAll('.line.final, .llm-block, .divider');
+    if (elements.length === 0) {
+      alert('No conversation to download yet.');
+      return;
+    }
+
+    elements.forEach(el => {
+      if (el.classList.contains('divider')) {
+        lines.push('');
+        lines.push('─── ' + el.textContent.trim() + ' ───');
+        lines.push('');
+      } else if (el.classList.contains('llm-block')) {
+        const textEl = el.querySelector('#llm-text, span:last-child');
+        const text = textEl ? textEl.textContent.trim() : el.textContent.trim();
+        // Remove the label text if present
+        const label = el.querySelector('.llm-label');
+        const labelText = label ? label.textContent.trim() : '';
+        let body = text;
+        if (labelText && body.startsWith(labelText)) {
+          body = body.substring(labelText.length).trim();
+        }
+        lines.push('[Sync AI]');
+        lines.push(body);
+        lines.push('');
+      } else if (el.classList.contains('final')) {
+        // Extract timestamp and text
+        const tsEl = el.querySelector('.ts');
+        const ts = tsEl ? tsEl.textContent.trim() : '';
+        const raw = el.textContent.trim();
+        const text = ts ? raw.substring(ts.length).trim() : raw;
+        lines.push('[' + ts + ']  ' + text);
+      }
+    });
+
+    lines.push('');
+    lines.push(sep);
+    lines.push('End of conversation');
+    lines.push(sep);
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SyncScribe_' + date.toISOString().slice(0,10) + '_' + date.toTimeString().slice(0,5).replace(':','-') + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
