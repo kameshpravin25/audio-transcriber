@@ -43,15 +43,32 @@ browser_clients: list[WebSocket] = []
 # Accumulates FINAL transcript lines during an active ESP32 session
 transcript_buffer: list[str] = []
 
-# Conversation history for multi-turn LLM chat
+# Conversation history for multi-turn LLM summarization
 conversation_history: list[tuple] = []
 
-# ─── LLM setup (same pattern as new_with_llmv1.py) ──────────────────────────
+# Separate chat history for user ↔ Sync AI conversations
+chat_history: list[tuple] = []
 
+# Stores ALL generated summaries so chat can reference them
+summary_history: list[str] = []
+
+# ─── LLM setup ───────────────────────────────────────────────────────────────
+
+# LLM for transcript summarization (Sync AI button)
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     google_api_key=GOOGLE_API_KEY,
     temperature=1.0,
+    max_tokens=None,
+    timeout=None,
+    max_retries=2,
+)
+
+# Separate LLM for chat conversations (summary-aware Q&A)
+chat_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0.7,
     max_tokens=None,
     timeout=None,
     max_retries=2,
@@ -65,12 +82,24 @@ LLM_SYSTEM_PROMPT = (
     "to help deepen the discussion or clarify important details."
 )
 
+CHAT_SYSTEM_PROMPT = (
+    "You are Sync AI, a knowledgeable and friendly conversational assistant. "
+    "You have access to ALL the AI-generated summaries from the user's audio "
+    "transcription session. Use these summaries as your primary knowledge base "
+    "to answer the user's questions accurately. "
+    "If the user asks about something covered in the summaries, reference the "
+    "relevant summary details in your answer. "
+    "Keep answers clear and concise (2-4 sentences) unless the user asks for detail. "
+    "Be natural and conversational."
+)
+
 
 async def run_llm_on_transcript(full_transcript: str):
     """
     Send the buffered transcript to Gemini via LangChain.
     Uses tuple-based messages and run_in_executor (same as new_with_llmv1.py).
     Streams the response back to browser clients.
+    Each call is independent — previous summaries are NOT carried forward.
     """
     if not full_transcript.strip():
         await broadcast("__LLM_ERROR__:No transcript to process.")
@@ -79,18 +108,14 @@ async def run_llm_on_transcript(full_transcript: str):
     await broadcast("__LLM_START__")
     print(f"[LLM] Processing transcript ({len(full_transcript)} chars)...")
 
+    # Clear conversation history so each sync is independent (no appending)
+    conversation_history.clear()
+
     # Build message list using tuples: (role, content)
     messages = [("system", LLM_SYSTEM_PROMPT)]
 
-    # Replay previous turns for context
-    for role, content in conversation_history:
-        messages.append((role, content))
-
-    # Add current user turn
+    # Add current transcript as the only user turn (no previous turns)
     messages.append(("human", full_transcript))
-
-    # Save user turn to history
-    conversation_history.append(("human", full_transcript))
 
     try:
         # Call Gemini in a thread (same pattern as new_with_llmv1.py)
@@ -101,8 +126,12 @@ async def run_llm_on_transcript(full_transcript: str):
         # Send the full response to browser
         await broadcast(f"__LLM_TOKEN__:{full_response}")
 
-        # Save assistant turn to history
-        conversation_history.append(("ai", full_response))
+        # Save this summary so chat can reference it later
+        summary_history.append(full_response)
+
+        # Clear the transcript buffer so next sync only gets NEW lines
+        transcript_buffer.clear()
+
         await broadcast("__LLM_DONE__")
         print(f"[LLM] Response: {full_response[:100]}...")
 
@@ -110,6 +139,68 @@ async def run_llm_on_transcript(full_transcript: str):
         err = str(e)
         print(f"[LLM] Error: {err}")
         await broadcast(f"__LLM_ERROR__:{err}")
+
+
+async def run_chat_response(user_message: str):
+    """
+    Handle a chat message from the user.
+    Uses chat_llm (separate Gemini instance) with ALL generated summaries
+    as context so the user can ask questions about any summary.
+    Runs in parallel with STT — does not block audio processing.
+    """
+    if not user_message.strip():
+        await broadcast("__CHAT_ERROR__:Empty message.")
+        return
+
+    await broadcast("__CHAT_START__")
+    print(f"[Chat] User: {user_message[:80]}...")
+
+    # Build message list with chat system prompt
+    messages = [("system", CHAT_SYSTEM_PROMPT)]
+
+    # Inject ALL generated summaries as context
+    if summary_history:
+        summaries_context = "\n\n".join(
+            f"--- Summary {i+1} ---\n{s}" for i, s in enumerate(summary_history)
+        )
+        messages.append((
+            "system",
+            f"Here are all the AI-generated summaries from this session "
+            f"({len(summary_history)} total). Use these to answer the user's "
+            f"questions:\n\n{summaries_context}"
+        ))
+
+    # Include current (unsummarized) transcript if available
+    if transcript_buffer:
+        transcript_context = " ".join(transcript_buffer)
+        messages.append((
+            "system",
+            f"Current live transcript (not yet summarized): {transcript_context}"
+        ))
+
+    # Replay previous chat turns
+    for role, content in chat_history:
+        messages.append((role, content))
+
+    # Add current user message
+    messages.append(("human", user_message))
+    chat_history.append(("human", user_message))
+
+    try:
+        loop = asyncio.get_event_loop()
+        ai_msg = await loop.run_in_executor(None, chat_llm.invoke, messages)
+
+        full_response = ai_msg.content
+
+        await broadcast(f"__CHAT_TOKEN__:{full_response}")
+        chat_history.append(("ai", full_response))
+        await broadcast("__CHAT_DONE__")
+        print(f"[Chat] Sync AI: {full_response[:100]}...")
+
+    except Exception as e:
+        err = str(e)
+        print(f"[Chat] Error: {err}")
+        await broadcast(f"__CHAT_ERROR__:{err}")
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -150,10 +241,16 @@ async def websocket_browser(ws: WebSocket):
             if msg == "PROCESS":
                 full_text = " ".join(transcript_buffer)
                 asyncio.create_task(run_llm_on_transcript(full_text))
+            # Browser sends chat message as "CHAT:message"
+            elif msg.startswith("CHAT:"):
+                user_msg = msg[5:]
+                asyncio.create_task(run_chat_response(user_msg))
             # Browser sends "CLEAR_HISTORY" to reset conversation
             elif msg == "CLEAR_HISTORY":
                 conversation_history.clear()
+                chat_history.clear()
                 transcript_buffer.clear()
+                summary_history.clear()
                 await broadcast("__STATUS__:history_cleared")
     except WebSocketDisconnect:
         if ws in browser_clients:
@@ -445,7 +542,7 @@ PAGE_HTML = """\
   /* ── Transcript area ────────────────────────── */
   main {
     flex: 1;
-    padding: 24px 32px 100px;
+    padding: 24px 32px 150px;
     overflow-y: auto;
   }
 
@@ -614,6 +711,112 @@ PAGE_HTML = """\
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.2; }
   }
+
+  /* ── Chat input bar ────────────────────────── */
+  .chat-bar {
+    position: fixed;
+    bottom: 48px; left: 0; right: 0;
+    padding: 10px 32px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 100;
+  }
+
+  .chat-bar input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 15px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .chat-bar input:focus {
+    border-color: var(--llm);
+  }
+  .chat-bar input::placeholder {
+    color: var(--muted);
+  }
+
+  .chat-bar button {
+    background: var(--llm-dim);
+    border: 1px solid var(--llm);
+    color: var(--llm);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .chat-bar button:hover {
+    background: #312e81;
+    color: #c7d2fe;
+  }
+  .chat-bar button:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  /* ── Chat bubbles ───────────────────────────── */
+  .chat-user {
+    align-self: flex-end;
+    background: #1a3a2a;
+    border: 1px solid var(--accent-dim);
+    border-radius: 12px 12px 2px 12px;
+    padding: 10px 16px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--accent);
+    max-width: 80%;
+    margin-top: 8px;
+    animation: fadein 0.2s ease;
+  }
+  .chat-user .chat-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--accent-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+
+  .chat-ai {
+    align-self: flex-start;
+    background: #1a1b2e;
+    border: 1px solid var(--llm-dim);
+    border-radius: 12px 12px 12px 2px;
+    padding: 10px 16px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #c7d2fe;
+    max-width: 80%;
+    margin-top: 4px;
+    animation: fadein 0.25s ease;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .chat-ai .chat-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--llm);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+
 </style>
 </head>
 <body>
@@ -669,6 +872,11 @@ PAGE_HTML = """\
   </div>
 </footer>
 
+<div class="chat-bar">
+  <input type="text" id="chat-input" placeholder="Chat with Sync AI..." autocomplete="off" />
+  <button id="btn-chat-send" onclick="sendChat()">Send</button>
+</div>
+
 <script>
   const container   = document.getElementById('transcript-container');
   const emptyEl     = document.getElementById('empty');
@@ -678,18 +886,31 @@ PAGE_HTML = """\
   const dotEsp      = document.getElementById('dot-esp');
   const dotLlm      = document.getElementById('dot-llm');
   const btnStop     = document.getElementById('btn-stop');
+  const chatInput   = document.getElementById('chat-input');
+  const btnChatSend = document.getElementById('btn-chat-send');
 
   let interimEl    = null;
   let lineCount    = 0;
   let hasTranscript = false;   // true once at least one FINAL line exists
   let llmStreaming  = false;
+  let chatStreaming = false;
   let currentLlmEl  = null;    // the active streaming .llm-block
+  let currentChatAiEl = null;  // the active streaming chat-ai bubble
   let ws;
 
-  // ── Keyboard shortcut Q ──────────────────────────────────────────────────
+  // ── Keyboard shortcut Q (skip when typing in chat input) ──────────────────
   document.addEventListener('keydown', (e) => {
+    if (document.activeElement === chatInput) return;
     if ((e.key === 'q' || e.key === 'Q') && !e.ctrlKey && !e.metaKey) {
       triggerLLM();
+    }
+  });
+
+  // ── Enter key in chat input ───────────────────────────────────────────────
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
     }
   });
 
@@ -745,6 +966,72 @@ PAGE_HTML = """\
     ws.send('CLEAR_HISTORY');
   }
 
+  // ── Chat functions ────────────────────────────────────────────────────────
+  function sendChat() {
+    const msg = chatInput.value.trim();
+    if (!msg || chatStreaming) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Show user bubble
+    emptyEl.style.display = 'none';
+    const userBubble = document.createElement('div');
+    userBubble.className = 'chat-user';
+    userBubble.innerHTML = '<div class="chat-label">You</div>' + escHtml(msg);
+    container.appendChild(userBubble);
+    scrollBottom();
+
+    // Send to server
+    ws.send('CHAT:' + msg);
+    chatInput.value = '';
+    chatInput.focus();
+  }
+
+  function startChatBlock() {
+    chatStreaming = true;
+    dotLlm.className = 'dot llm';
+    btnChatSend.disabled = true;
+
+    currentChatAiEl = document.createElement('div');
+    currentChatAiEl.className = 'chat-ai';
+    currentChatAiEl.innerHTML =
+      '<div class="chat-label"><span class="pulse" id="chat-pulse"></span> Sync AI</div>' +
+      '<span id="chat-ai-text"></span>';
+    container.appendChild(currentChatAiEl);
+    scrollBottom();
+  }
+
+  function appendChatToken(token) {
+    const textEl = document.getElementById('chat-ai-text');
+    if (textEl) {
+      textEl.textContent += token;
+      scrollBottom();
+    }
+  }
+
+  function finishChatBlock() {
+    chatStreaming = false;
+    dotLlm.className = 'dot ok';
+    btnChatSend.disabled = false;
+
+    const pulse = document.getElementById('chat-pulse');
+    if (pulse) pulse.className = 'pulse done';
+
+    scrollBottom();
+    chatInput.focus();
+  }
+
+  function showChatError(msg) {
+    chatStreaming = false;
+    dotLlm.className = 'dot err';
+    btnChatSend.disabled = false;
+    if (currentChatAiEl) {
+      const textEl = document.getElementById('chat-ai-text');
+      if (textEl) textEl.textContent = '⚠ ' + msg;
+    }
+  }
+
+
+
   function startLlmBlock() {
     llmStreaming = true;
     dotLlm.className = 'dot llm';
@@ -760,14 +1047,15 @@ PAGE_HTML = """\
     currentLlmEl = document.createElement('div');
     currentLlmEl.className = 'llm-block';
     currentLlmEl.innerHTML =
-      '<div class="llm-label"><span class="pulse" id="llm-pulse"></span> Sync AI is thinking...</div>' +
-      '<span id="llm-text"></span>';
+      '<div class="llm-label"><span class="pulse llm-pulse"></span> Sync AI is thinking...</div>' +
+      '<span class="llm-text"></span>';
     container.appendChild(currentLlmEl);
     scrollBottom();
   }
 
   function appendLlmToken(token) {
-    const textEl = document.getElementById('llm-text');
+    if (!currentLlmEl) return;
+    const textEl = currentLlmEl.querySelector('.llm-text');
     if (textEl) {
       textEl.textContent += token;
       scrollBottom();
@@ -778,8 +1066,8 @@ PAGE_HTML = """\
     llmStreaming = false;
     dotLlm.className = 'dot ok';
 
-    const pulse = document.getElementById('llm-pulse');
-    if (pulse) pulse.className = 'pulse done';
+    const pulse = currentLlmEl && currentLlmEl.querySelector('.llm-pulse');
+    if (pulse) pulse.className = 'pulse done llm-pulse';
 
     const label = currentLlmEl && currentLlmEl.querySelector('.llm-label');
     if (label) label.innerHTML = '<span class="pulse done"></span> Sync AI';
@@ -797,7 +1085,7 @@ PAGE_HTML = """\
     llmStreaming = false;
     dotLlm.className = 'dot err';
     if (currentLlmEl) {
-      const textEl = document.getElementById('llm-text');
+      const textEl = currentLlmEl.querySelector('.llm-text');
       if (textEl) textEl.textContent = '⚠ ' + msg;
       const label = currentLlmEl.querySelector('.llm-label');
       if (label) label.innerHTML = '<span class="pulse done" style="background:var(--danger)"></span> Error';
@@ -807,11 +1095,12 @@ PAGE_HTML = """\
 
   // ── Clear functions ───────────────────────────────────────────────────────
   function clearTranscript() {
-    container.querySelectorAll('.line, .llm-block, .divider').forEach(el => el.remove());
-    interimEl     = null;
-    currentLlmEl  = null;
-    lineCount     = 0;
-    hasTranscript = false;
+    container.querySelectorAll('.line, .llm-block, .divider, .chat-user, .chat-ai').forEach(el => el.remove());
+    interimEl       = null;
+    currentLlmEl    = null;
+    currentChatAiEl = null;
+    lineCount       = 0;
+    hasTranscript   = false;
     countEl.textContent = '0 lines';
     emptyEl.style.display = '';
     btnStop.disabled = true;
@@ -879,6 +1168,25 @@ PAGE_HTML = """\
         showLlmError(msg.substring('__LLM_ERROR__:'.length));
         return;
       }
+
+      // ── Chat events ───────────────────────────────────────────────────────
+      if (msg === '__CHAT_START__') {
+        startChatBlock();
+        return;
+      }
+      if (msg.startsWith('__CHAT_TOKEN__:')) {
+        appendChatToken(msg.substring('__CHAT_TOKEN__:'.length));
+        return;
+      }
+      if (msg === '__CHAT_DONE__') {
+        finishChatBlock();
+        return;
+      }
+      if (msg.startsWith('__CHAT_ERROR__:')) {
+        showChatError(msg.substring('__CHAT_ERROR__:'.length));
+        return;
+      }
+
 
       // ── Debug log ─────────────────────────────────────────────────────
       if (msg.startsWith('__DEBUG__:')) {
