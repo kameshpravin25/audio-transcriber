@@ -8,13 +8,15 @@ FastAPI server that:
 """
 
 import asyncio
+import io
 import json
 import os
+import struct
 from contextlib import asynccontextmanager
 
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -45,6 +47,9 @@ transcript_buffer: list[str] = []
 
 # Conversation history for multi-turn LLM chat
 conversation_history: list[tuple] = []
+
+# Accumulates raw PCM audio bytes for download
+audio_buffer: bytearray = bytearray()
 
 # ─── LLM setup (same pattern as new_with_llmv1.py) ──────────────────────────
 
@@ -168,8 +173,9 @@ async def websocket_audio(esp_ws: WebSocket):
     await broadcast("__STATUS__:esp32_connected")
     print("[ESP32] Connected via WebSocket")
 
-    # Clear buffer for new session
+    # Clear buffers for new session
     transcript_buffer.clear()
+    audio_buffer.clear()
 
     dg_ws = None
     recv_task = None
@@ -261,6 +267,8 @@ async def websocket_audio(esp_ws: WebSocket):
 
         while True:
             audio = await esp_ws.receive_bytes()
+            # Buffer raw PCM for audio download
+            audio_buffer.extend(audio)
             try:
                 await dg_ws.send(audio)
             except Exception as send_err:
@@ -566,6 +574,15 @@ PAGE_HTML = """\
     background: #06553e22;
   }
 
+  footer button#btn-download-audio {
+    border-color: #92400e;
+    color: var(--warn);
+  }
+  footer button#btn-download-audio:hover {
+    border-color: var(--warn);
+    background: #92400e22;
+  }
+
   footer button#btn-debug-toggle {
     border-color: var(--llm-dim);
     color: var(--llm);
@@ -684,7 +701,11 @@ PAGE_HTML = """\
     </button>
     <button id="btn-download" onclick="downloadConversation()"
             title="Download conversation as text file">
-      ↓ Download
+      ↓ Transcript
+    </button>
+    <button id="btn-download-audio" onclick="downloadAudio()"
+            title="Download session audio as WAV file">
+      ♫ Audio
     </button>
     <button onclick="clearTranscript()">Clear</button>
     <button id="btn-clear-history" onclick="clearHistory()">Reset Chat</button>
@@ -994,6 +1015,10 @@ PAGE_HTML = """\
     };
   }
 
+  function downloadAudio() {
+    window.open('/download/audio', '_blank');
+  }
+
   connect();
 </script>
 </body>
@@ -1004,6 +1029,48 @@ PAGE_HTML = """\
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return PAGE_HTML
+
+
+@app.get("/download/audio")
+async def download_audio():
+    """Serve the buffered raw PCM audio as a downloadable WAV file."""
+    if len(audio_buffer) == 0:
+        return HTMLResponse("<h3>No audio recorded yet.</h3>", status_code=404)
+
+    # Build WAV in memory from raw 16-bit mono PCM
+    num_channels = 1
+    sample_width = 2  # 16-bit
+    byte_rate = SAMPLE_RATE * num_channels * sample_width
+    block_align = num_channels * sample_width
+    data_size = len(audio_buffer)
+
+    wav_buf = io.BytesIO()
+    # RIFF header
+    wav_buf.write(b'RIFF')
+    wav_buf.write(struct.pack('<I', 36 + data_size))  # file size - 8
+    wav_buf.write(b'WAVE')
+    # fmt chunk
+    wav_buf.write(b'fmt ')
+    wav_buf.write(struct.pack('<I', 16))               # chunk size
+    wav_buf.write(struct.pack('<H', 1))                # PCM format
+    wav_buf.write(struct.pack('<H', num_channels))
+    wav_buf.write(struct.pack('<I', SAMPLE_RATE))
+    wav_buf.write(struct.pack('<I', byte_rate))
+    wav_buf.write(struct.pack('<H', block_align))
+    wav_buf.write(struct.pack('<H', sample_width * 8)) # bits per sample
+    # data chunk
+    wav_buf.write(b'data')
+    wav_buf.write(struct.pack('<I', data_size))
+    wav_buf.write(bytes(audio_buffer))
+
+    wav_buf.seek(0)
+    from datetime import datetime
+    filename = f"SyncScribe_audio_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.wav"
+    return StreamingResponse(
+        wav_buf,
+        media_type="audio/wav",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────────
