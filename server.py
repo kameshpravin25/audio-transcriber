@@ -349,15 +349,63 @@ PAGE_HTML = """\
     flex-direction: column;
   }
 
-  /* ── Header ─────────────────────────────────── */
+  /* ── Header (glassmorphism) ──────────────────── */
   header {
     padding: 28px 32px 20px;
-    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    /* Glass background */
+    background: rgba(20, 23, 29, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    /* Glass border & glow */
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: none;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+      inset 0 0 12px 2px rgba(255, 255, 255, 0.03);
+  }
+
+  /* Top edge light streak */
+  header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 5%,
+      rgba(255, 255, 255, 0.35),
+      rgba(52, 211, 153, 0.25),
+      rgba(255, 255, 255, 0.35),
+      transparent 95%
+    );
+  }
+
+  /* Left edge light streak */
+  header::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 100%;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.3),
+      transparent 50%,
+      rgba(255, 255, 255, 0.08)
+    );
   }
 
   header h1 {
