@@ -34,7 +34,6 @@ DEEPGRAM_URL = (
     f"&interim_results=true&punctuate=true"
     f"&smart_format=true&endpointing=500"
     f"&utterance_end_ms=1500"
-    f"&diarize=true"
 )
 
 # ─── Shared state ────────────────────────────────────────────────────────────
@@ -234,25 +233,12 @@ async def websocket_audio(esp_ws: WebSocket):
                     if transcript:
                         is_final = data.get("is_final", False)
                         prefix = "FINAL" if is_final else "INTERIM"
-
-                        # Extract speaker from word-level diarization
-                        words = alternatives[0].get("words", [])
-                        speaker_id = None
-                        if words:
-                            # Use the speaker of the first word in this utterance
-                            speaker_id = words[0].get("speaker")
-
-                        if speaker_id is not None:
-                            display = f"Speaker {speaker_id}: {transcript}"
-                        else:
-                            display = transcript
-
-                        await broadcast(f"__{prefix}__:{display}")
-                        print(f"[{prefix}] {display}")
+                        await broadcast(f"__{prefix}__:{transcript}")
+                        print(f"[{prefix}] {transcript}")
 
                         # Buffer only final lines for LLM
                         if is_final:
-                            transcript_buffer.append(display)
+                            transcript_buffer.append(transcript)
 
             except asyncio.CancelledError:
                 print(f"[Deepgram] Receive task cancelled after {msg_count} messages")
@@ -436,27 +422,6 @@ PAGE_HTML = """\
     border-left: 3px solid var(--accent-dim);
     color: var(--text);
   }
-
-  .line.final.speaker-0 { border-left-color: #34d399; }
-  .line.final.speaker-1 { border-left-color: #60a5fa; }
-  .line.final.speaker-2 { border-left-color: #f472b6; }
-  .line.final.speaker-3 { border-left-color: #fbbf24; }
-  .line.final.speaker-4 { border-left-color: #a78bfa; }
-
-  .speaker-tag {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 1px 7px;
-    border-radius: 3px;
-    margin-right: 8px;
-    display: inline-block;
-  }
-  .speaker-tag.s0 { background: #34d39922; color: #34d399; }
-  .speaker-tag.s1 { background: #60a5fa22; color: #60a5fa; }
-  .speaker-tag.s2 { background: #f472b622; color: #f472b6; }
-  .speaker-tag.s3 { background: #fbbf2422; color: #fbbf24; }
-  .speaker-tag.s4 { background: #a78bfa22; color: #a78bfa; }
 
   .line.interim {
     background: transparent;
@@ -695,39 +660,13 @@ PAGE_HTML = """\
     return d.innerHTML;
   }
 
-  // ── Speaker parsing helper ────────────────────────────────────────────────
-  const speakerNames = ['Speaker 1', 'Speaker 2', 'Speaker 3', 'Speaker 4', 'Speaker 5'];
-  const speakerColors = ['s0', 's1', 's2', 's3', 's4'];
-
-  function parseSpeaker(text) {
-    const match = text.match(/^Speaker (\d+): (.*)$/);
-    if (match) {
-      const id = parseInt(match[1]);
-      const name = speakerNames[id] || ('Speaker ' + (id + 1));
-      const cls = speakerColors[id] || 's0';
-      return { id, name, cls, content: match[2] };
-    }
-    return null;
-  }
-
   // ── Transcript lines ──────────────────────────────────────────────────────
   function addFinalLine(text) {
     if (interimEl) { interimEl.remove(); interimEl = null; }
     emptyEl.style.display = 'none';
     const div = document.createElement('div');
     div.className = 'line final';
-
-    const speaker = parseSpeaker(text);
-    if (speaker) {
-      div.classList.add('speaker-' + speaker.id);
-      div.innerHTML =
-        '<span class="ts">' + now() + '</span>' +
-        '<span class="speaker-tag ' + speaker.cls + '">' + escHtml(speaker.name) + '</span>' +
-        escHtml(speaker.content);
-    } else {
-      div.innerHTML = '<span class="ts">' + now() + '</span>' + escHtml(text);
-    }
-
+    div.innerHTML = '<span class="ts">' + now() + '</span>' + escHtml(text);
     container.appendChild(div);
     lineCount++;
     countEl.textContent = lineCount + ' line' + (lineCount === 1 ? '' : 's');
@@ -742,15 +681,7 @@ PAGE_HTML = """\
       interimEl.className = 'line interim';
       container.appendChild(interimEl);
     }
-    const speaker = parseSpeaker(text);
-    if (speaker) {
-      interimEl.innerHTML =
-        '<span class="ts">' + now() + '</span>' +
-        '<span class="speaker-tag ' + speaker.cls + '" style="opacity:0.6">' + escHtml(speaker.name) + '</span>' +
-        escHtml(speaker.content);
-    } else {
-      interimEl.innerHTML = '<span class="ts">' + now() + '</span>' + escHtml(text);
-    }
+    interimEl.innerHTML = '<span class="ts">' + now() + '</span>' + escHtml(text);
     scrollBottom();
   }
 
