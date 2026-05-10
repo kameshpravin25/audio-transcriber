@@ -513,12 +513,41 @@ PAGE_HTML = """\
     );
   }
 
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
   header h1 {
     font-family: 'IBM Plex Mono', monospace;
     font-weight: 600;
     font-size: 18px;
     letter-spacing: -0.02em;
     color: var(--text);
+  }
+
+  .btn-download {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 14px;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .btn-download:hover {
+    border-color: var(--accent-dim);
+    color: var(--accent);
+    background: rgba(52, 211, 153, 0.08);
+  }
+  .btn-download:active {
+    transform: scale(0.92);
   }
 
   .status-row {
@@ -973,7 +1002,12 @@ PAGE_HTML = """\
 <body>
 
 <header>
-  <h1>SyncScribe</h1>
+  <div class="header-left">
+    <h1>SyncScribe</h1>
+    <button class="btn-download" onclick="downloadSession()" title="Download transcript & chat as .txt">
+      ⬇
+    </button>
+  </div>
   <div class="status-row">
     <div class="status-item">
       <span class="dot" id="dot-ws"></span>
@@ -1417,6 +1451,82 @@ PAGE_HTML = """\
         return;
       }
     };
+  }
+
+  // ── Download session as .txt ────────────────────────────────────────────────
+  function downloadSession() {
+    let txt = '';
+    const now = new Date().toLocaleString();
+    txt += '═══════════════════════════════════════════\n';
+    txt += '  SyncScribe — Session Export\n';
+    txt += '  Downloaded: ' + now + '\n';
+    txt += '═══════════════════════════════════════════\n\n';
+
+    // ── Transcript lines ──
+    const lines = container.querySelectorAll('.line.final');
+    if (lines.length > 0) {
+      txt += '── TRANSCRIPT (' + lines.length + ' lines) ───────────────────\n\n';
+      lines.forEach(el => {
+        const ts = el.querySelector('.ts');
+        const timestamp = ts ? ts.textContent.trim() : '';
+        // Get text without the timestamp
+        const clone = el.cloneNode(true);
+        const tsClone = clone.querySelector('.ts');
+        if (tsClone) tsClone.remove();
+        const text = clone.textContent.trim();
+        txt += '[' + timestamp + '] ' + text + '\n';
+      });
+      txt += '\n';
+    }
+
+    // ── AI Summaries ──
+    const summaries = container.querySelectorAll('.llm-block');
+    if (summaries.length > 0) {
+      txt += '── AI SUMMARIES (' + summaries.length + ') ────────────────────\n\n';
+      summaries.forEach((el, i) => {
+        const textEl = el.querySelector('.llm-text');
+        const text = textEl ? textEl.textContent.trim() : el.textContent.trim();
+        txt += '--- Summary ' + (i + 1) + ' ---\n';
+        txt += text + '\n\n';
+      });
+    }
+
+    // ── Chat messages ──
+    const chatMsgs = chatContainer.querySelectorAll('.chat-user, .chat-ai');
+    if (chatMsgs.length > 0) {
+      txt += '── CHAT WITH SYNC AI ───────────────────────\n\n';
+      chatMsgs.forEach(el => {
+        if (el.classList.contains('chat-user')) {
+          const clone = el.cloneNode(true);
+          const label = clone.querySelector('.chat-label');
+          if (label) label.remove();
+          txt += 'You: ' + clone.textContent.trim() + '\n\n';
+        } else {
+          const textEl = el.querySelector('.chat-ai-text');
+          const text = textEl ? textEl.textContent.trim() : el.textContent.trim();
+          txt += 'Sync AI: ' + text + '\n\n';
+        }
+      });
+    }
+
+    if (!txt.includes('TRANSCRIPT') && !txt.includes('SUMMARIES') && !txt.includes('CHAT')) {
+      txt += '(No transcript, summaries, or chat messages yet.)\n';
+    }
+
+    txt += '\n═══════════════════════════════════════════\n';
+    txt += '  End of SyncScribe Export\n';
+    txt += '═══════════════════════════════════════════\n';
+
+    // Trigger download
+    const blob = new Blob([txt], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SyncScribe_' + new Date().toISOString().slice(0,10) + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   connect();
