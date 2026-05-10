@@ -30,8 +30,8 @@
 //10.82.206.110
 //audio-transcriber.up.railway.app
 // ─── Server Configuration ───────────────────────────────────────────────────
-const char* SERVER_HOST = "10.82.206.110";
-const uint16_t SERVER_PORT = ;
+const char* SERVER_HOST = "audio-transcriber.up.railway.app";
+const uint16_t SERVER_PORT = 443;
 const char* WS_PATH = "/ws/audio";
 
 // ─── Pin Definitions ────────────────────────────────────────────────────────
