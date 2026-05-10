@@ -21,7 +21,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 DEEPGRAM_API_KEY = "7d326f4220990e0a7dfff768d613c826f539726b"
-GOOGLE_API_KEY      = "AIzaSyAovA40kOlPkQNOW5MEK2Zw9xRghfluuZQ"
+GOOGLE_API_KEY      = "AIzaSyBCxZPEwUqiW26N106N3ToLiFZ55W5Jk-I"
 GOOGLE_API_KEY_CHAT = "AIzaSyB8bb-S565l7kaeG7VU3NyfIAk58WRD5Q0"
 
 SAMPLE_RATE  = 16000
