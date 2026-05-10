@@ -1022,6 +1022,7 @@ PAGE_HTML = """\
     </button>
     <button onclick="clearTranscript()">Clear</button>
     <button id="btn-clear-history" onclick="clearHistory()">Reset Chat</button>
+    <button onclick="downloadSession()">⬇ Download</button>
   </div>
 </footer>
 </div>
@@ -1317,6 +1318,54 @@ PAGE_HTML = """\
     chatContainer.querySelectorAll('.chat-user, .chat-ai').forEach(el => el.remove());
     currentChatAiEl = null;
     if (chatEmptyEl) chatEmptyEl.style.display = '';
+  }
+
+  // ── Download function ─────────────────────────────────────────────────────
+  function downloadSession() {
+    let content = "=== SYNCSCRIBE SESSION ===\n\n";
+    
+    content += "--- TRANSCRIPT & SUMMARIES ---\n";
+    const leftItems = container.querySelectorAll('.line.final, .llm-block');
+    leftItems.forEach(el => {
+      if (el.classList.contains('line')) {
+        const ts = el.querySelector('.ts') ? el.querySelector('.ts').innerText : '';
+        const textNode = el.childNodes[1];
+        const text = textNode ? textNode.textContent : el.textContent;
+        content += `[${ts}] ${text.trim()}\n`;
+      } else if (el.classList.contains('llm-block')) {
+        const textEl = el.querySelector('.llm-text');
+        const text = textEl ? textEl.textContent : '';
+        content += `\n>>> SYNC AI SUMMARY <<<\n${text}\n\n`;
+      }
+    });
+
+    content += "\n--- CHAT WITH SYNC AI ---\n";
+    const chatItems = chatContainer.querySelectorAll('.chat-user, .chat-ai');
+    if (chatItems.length === 0) {
+      content += "(No chat history)\n";
+    }
+    chatItems.forEach(el => {
+      if (el.classList.contains('chat-user')) {
+        const textNode = el.childNodes[1];
+        const text = textNode ? textNode.textContent : el.textContent;
+        content += `You: ${text.trim()}\n`;
+      } else if (el.classList.contains('chat-ai')) {
+        const textEl = el.querySelector('.chat-ai-text');
+        const text = textEl ? textEl.textContent : '';
+        content += `Sync AI: ${text.trim()}\n\n`;
+      }
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').slice(0, 19);
+    a.download = `SyncScribe_${dateStr}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
