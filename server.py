@@ -875,31 +875,6 @@ PAGE_HTML = """\
     gap: 6px;
   }
 
-  /* ── Download button ──────────────────────────── */
-  .btn-download {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    padding: 6px 14px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .btn-download:hover {
-    border-color: var(--accent-dim);
-    color: var(--accent);
-    background: rgba(52, 211, 153, 0.08);
-  }
-  .btn-download svg {
-    width: 14px; height: 14px;
-    fill: currentColor;
-  }
-
   /* ── Mobile tab bar ──────────────────────────── */
   .mobile-tabs {
     display: none;
@@ -988,13 +963,6 @@ PAGE_HTML = """\
       padding: 8px 10px;
     }
 
-    .btn-download .dl-label {
-      display: none;
-    }
-    .btn-download {
-      padding: 6px 8px;
-    }
-
     #debug-panel {
       display: none !important;
     }
@@ -1006,29 +974,23 @@ PAGE_HTML = """\
 
 <header>
   <h1>SyncScribe</h1>
-  <div style="display:flex;align-items:center;gap:16px;">
-    <div class="status-row">
-      <div class="status-item">
-        <span class="dot" id="dot-ws"></span>
-        <span id="lbl-ws">WebSocket</span>
-      </div>
-      <div class="status-item">
-        <span class="dot" id="dot-dg"></span>
-        <span id="lbl-dg">Deepgram</span>
-      </div>
-      <div class="status-item">
-        <span class="dot" id="dot-esp"></span>
-        <span id="lbl-esp">ESP32</span>
-      </div>
-      <div class="status-item">
-        <span class="dot" id="dot-llm"></span>
-        <span id="lbl-llm">Sync AI</span>
-      </div>
+  <div class="status-row">
+    <div class="status-item">
+      <span class="dot" id="dot-ws"></span>
+      <span id="lbl-ws">WebSocket</span>
     </div>
-    <button class="btn-download" onclick="downloadSession()" title="Download transcript & chat as .txt">
-      <svg viewBox="0 0 24 24"><path d="M12 16l-5-5h3V4h4v7h3l-5 5zm-7 2h14v2H5v-2z"/></svg>
-      <span class="dl-label">Export</span>
-    </button>
+    <div class="status-item">
+      <span class="dot" id="dot-dg"></span>
+      <span id="lbl-dg">Deepgram</span>
+    </div>
+    <div class="status-item">
+      <span class="dot" id="dot-esp"></span>
+      <span id="lbl-esp">ESP32</span>
+    </div>
+    <div class="status-item">
+      <span class="dot" id="dot-llm"></span>
+      <span id="lbl-llm">Sync AI</span>
+    </div>
   </div>
 </header>
 
@@ -1200,95 +1162,6 @@ PAGE_HTML = """\
     if (!hasTranscript || llmStreaming) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send('PROCESS');
-  }
-
-  // ── Download session as .txt ───────────────────────────────────────────────
-  function downloadSession() {
-    const lines = [];
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('en-GB');
-    const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
-
-    lines.push('═══════════════════════════════════════════');
-    lines.push('  SyncScribe — Session Export');
-    lines.push('  ' + dateStr + ' ' + timeStr);
-    lines.push('═══════════════════════════════════════════');
-    lines.push('');
-
-    // ── Transcript & Summaries (left panel) ──
-    lines.push('───────────────────────────────────────────');
-    lines.push('  TRANSCRIPT & AI SUMMARIES');
-    lines.push('───────────────────────────────────────────');
-    lines.push('');
-
-    const leftItems = container.querySelectorAll('.line.final, .llm-block, .divider');
-    leftItems.forEach(el => {
-      if (el.classList.contains('divider')) {
-        lines.push('');
-        lines.push('── ' + el.textContent.trim() + ' ──────────────');
-        lines.push('');
-      } else if (el.classList.contains('llm-block')) {
-        const textEl = el.querySelector('.llm-text');
-        if (textEl) {
-          lines.push('[Sync AI Summary]');
-          lines.push(textEl.textContent.trim());
-          lines.push('');
-        }
-      } else if (el.classList.contains('final')) {
-        const tsEl = el.querySelector('.ts');
-        const ts = tsEl ? tsEl.textContent.trim() : '';
-        // Get text without the timestamp
-        const clone = el.cloneNode(true);
-        const tsClone = clone.querySelector('.ts');
-        if (tsClone) tsClone.remove();
-        const text = clone.textContent.trim();
-        lines.push((ts ? '[' + ts + '] ' : '') + text);
-      }
-    });
-
-    lines.push('');
-    lines.push('');
-
-    // ── Chat messages (right panel) ──
-    lines.push('───────────────────────────────────────────');
-    lines.push('  CHAT WITH SYNC AI');
-    lines.push('───────────────────────────────────────────');
-    lines.push('');
-
-    const chatItems = chatContainer.querySelectorAll('.chat-user, .chat-ai');
-    if (chatItems.length === 0) {
-      lines.push('(No chat messages)');
-    }
-    chatItems.forEach(el => {
-      if (el.classList.contains('chat-user')) {
-        const clone = el.cloneNode(true);
-        const label = clone.querySelector('.chat-label');
-        if (label) label.remove();
-        lines.push('You: ' + clone.textContent.trim());
-      } else if (el.classList.contains('chat-ai')) {
-        const textEl = el.querySelector('.chat-ai-text');
-        if (textEl) {
-          lines.push('Sync AI: ' + textEl.textContent.trim());
-        }
-      }
-      lines.push('');
-    });
-
-    lines.push('');
-    lines.push('═══════════════════════════════════════════');
-    lines.push('  End of export');
-    lines.push('═══════════════════════════════════════════');
-
-    // Generate and download .txt file
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'SyncScribe_' + dateStr.replace(/\//g, '-') + '_' + timeStr.replace(/:/g, '-') + '.txt';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 
   function clearHistory() {
