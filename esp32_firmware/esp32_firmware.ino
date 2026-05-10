@@ -27,8 +27,7 @@
 #include <WiFiManager.h>
 #include <WebSocketsClient.h>
 #include "driver/i2s.h"
-//10.82.206.110
-//audio-transcriber.up.railway.app
+
 // ─── Server Configuration ───────────────────────────────────────────────────
 const char* SERVER_HOST = "audio-transcriber.up.railway.app";
 const uint16_t SERVER_PORT = 443;
@@ -93,11 +92,11 @@ void setup() {
   Serial.println("\n=== ESP32 Transcriber v2.0 ===");
 
   // ── WiFi (captive portal) ──
+  // Always clear saved credentials so the portal opens on every boot.
+  // No need to press BOOT button — just power cycle to pick a new network.
   WiFiManager wm;
-  if (digitalRead(WIFI_RESET_PIN) == LOW) {
-    wm.resetSettings();
-    Serial.println("[WiFi] Reset!");
-  }
+  wm.resetSettings();
+  Serial.println("[WiFi] Credentials cleared — opening captive portal...");
   wm.setConfigPortalTimeout(180);
   if (!wm.autoConnect("Transcriber-Setup")) { ESP.restart(); }
 
