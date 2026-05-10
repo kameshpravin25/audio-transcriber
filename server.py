@@ -731,6 +731,11 @@ PAGE_HTML = """\
     flex-direction: column;
     background: var(--surface);
   }
+  /* On desktop, .hidden class is ignored — both panels always show */
+  @media (min-width: 769px) {
+    .chat-panel.hidden { display: flex !important; }
+    .left-panel.hidden { display: flex !important; }
+  }
 
   .chat-panel-header {
     padding: 14px 18px;
@@ -870,6 +875,99 @@ PAGE_HTML = """\
     gap: 6px;
   }
 
+  /* ── Mobile tab bar ──────────────────────────── */
+  .mobile-tabs {
+    display: none;
+  }
+
+  /* ── Responsive: mobile layout ─────────────── */
+  @media (max-width: 768px) {
+    header {
+      padding: 14px 16px 12px;
+    }
+    header h1 {
+      font-size: 15px;
+    }
+    .status-row {
+      gap: 10px;
+      font-size: 10px;
+    }
+
+    .mobile-tabs {
+      display: flex;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0;
+      z-index: 50;
+    }
+    .mobile-tabs button {
+      flex: 1;
+      padding: 10px 0;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .mobile-tabs button.active {
+      color: var(--llm);
+      border-bottom-color: var(--llm);
+    }
+
+    .app-body {
+      flex-direction: column;
+      height: calc(100vh - 100px);
+    }
+
+    .left-panel {
+      display: flex !important;
+      flex: 1;
+      min-height: 0;
+    }
+    .left-panel.hidden {
+      display: none !important;
+    }
+
+    .chat-panel {
+      display: flex !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      flex: 1;
+      border-left: none !important;
+      border-top: 1px solid var(--border);
+    }
+    .chat-panel.hidden {
+      display: none !important;
+    }
+
+    main {
+      padding: 16px 16px 60px;
+    }
+
+    footer {
+      padding: 8px 12px;
+    }
+    .footer-btns {
+      gap: 4px;
+    }
+    footer button {
+      padding: 5px 10px;
+      font-size: 11px;
+    }
+
+    .chat-input-bar {
+      padding: 8px 10px;
+    }
+
+    #debug-panel {
+      display: none !important;
+    }
+  }
+
 </style>
 </head>
 <body>
@@ -896,10 +994,16 @@ PAGE_HTML = """\
   </div>
 </header>
 
+<!-- Mobile tab bar -->
+<div class="mobile-tabs" id="mobile-tabs">
+  <button class="active" id="tab-transcript" onclick="switchTab('transcript')">📝 Transcript</button>
+  <button id="tab-chat" onclick="switchTab('chat')">💬 Chat</button>
+</div>
+
 <div class="app-body">
 
 <!-- Left panel: transcript + summaries -->
-<div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+<div class="left-panel" id="left-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
 <main>
   <div id="transcript-container">
     <div class="empty-state" id="empty">
@@ -923,7 +1027,7 @@ PAGE_HTML = """\
 </div>
 
 <!-- Right panel: chat with Sync AI -->
-<aside class="chat-panel">
+<aside class="chat-panel hidden" id="chat-panel">
   <div class="chat-panel-header">
     <span class="panel-dot"></span>
     Chat with Sync AI
@@ -962,6 +1066,26 @@ PAGE_HTML = """\
   const btnChatSend = document.getElementById('btn-chat-send');
   const chatContainer = document.getElementById('chat-messages');
   const chatEmptyEl   = document.getElementById('chat-empty');
+  const leftPanel     = document.getElementById('left-panel');
+  const chatPanel     = document.getElementById('chat-panel');
+  const tabTranscript = document.getElementById('tab-transcript');
+  const tabChat       = document.getElementById('tab-chat');
+
+  // ── Mobile tab switching ──────────────────────────────────────────────────
+  function switchTab(tab) {
+    if (tab === 'transcript') {
+      leftPanel.classList.remove('hidden');
+      chatPanel.classList.add('hidden');
+      tabTranscript.classList.add('active');
+      tabChat.classList.remove('active');
+    } else {
+      leftPanel.classList.add('hidden');
+      chatPanel.classList.remove('hidden');
+      tabTranscript.classList.remove('active');
+      tabChat.classList.add('active');
+      scrollChatBottom();
+    }
+  }
 
   let interimEl    = null;
   let lineCount    = 0;
